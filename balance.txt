@@ -1,0 +1,117 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
+from xgboost import XGBClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc, RocCurveDisplay
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.preprocessing import label_binarize
+from sklearn.model_selection import cross_val_predict
+
+# Load dataset
+df = pd.read_csv('/content/survey lung cancer.csv')
+
+# Split dataset into features (X) and target label (y)
+X = df.drop(columns=['LUNG_CANCER'])  # Features (all columns except the target)
+y = df['LUNG_CANCER']  # Target (LUNG_CANCER)
+
+# Encode categorical columns (GENDER and any other categorical columns)
+label_encoder = LabelEncoder()
+X['GENDER'] = label_encoder.fit_transform(X['GENDER'])  # Encode 'GENDER' column
+
+# Encode the target label 'LUNG_CANCER'
+y = label_encoder.fit_transform(y)  # Encode target 'LUNG_CANCER' (0 or 1)
+
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Feature scaling (for numerical columns)
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Function to plot Confusion Matrix with "YES"/"NO" labels
+def plot_confusion_matrix(y_test, y_pred, title):
+    conf_matrix = confusion_matrix(y_test, y_pred)
+    conf_matrix_display = pd.DataFrame(conf_matrix, index=["NO", "YES"], columns=["NO", "YES"])  # Map 0 -> "NO", 1 -> "YES"
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(conf_matrix_display, annot=True, fmt='d', cmap='Blues')
+    plt.title(f"{title} Confusion Matrix")
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.show()
+
+# Function to plot ROC and AUC
+def plot_roc_auc(y_test, y_score, classifier_name):
+    fpr, tpr, _ = roc_curve(y_test, y_score)
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'Receiver Operating Characteristic - {classifier_name}')
+    plt.legend(loc="lower right")
+    plt.show()
+
+# Function to train and evaluate classifiers with ROC/AUC plots and confusion matrices
+def train_and_evaluate_classifiers(xtrain, xtest, ytrain, ytest):
+    classifiers = {
+        'Logistic Regression': LogisticRegression(max_iter=1000, C=0.1),
+        'Random Forest': RandomForestClassifier(n_estimators=100),
+        'AdaBoost': AdaBoostClassifier(n_estimators=100),
+        'Gradient Boosting': GradientBoostingClassifier(),
+        'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='logloss'),
+        'SVM': SVC(probability=True),  # Set probability=True to get ROC/AUC
+        'KNN': KNeighborsClassifier(n_neighbors=5),
+        'Decision Tree': DecisionTreeClassifier(max_depth=5)
+    }
+
+    scores = {}
+
+    for name, clf in classifiers.items():
+        # Cross-validation accuracy on the training set
+        cv_score = cross_val_score(clf, xtrain, ytrain, cv=5)
+        print(f"{name} cross-validation accuracy: {cv_score.mean():.4f} (+/- {cv_score.std():.4f})")
+
+        # Train the model
+        clf.fit(xtrain, ytrain)
+
+        # Test accuracy
+        score = clf.score(xtest, ytest)
+        scores[name] = score
+        print(f"{name} test accuracy: {score:.4f}")
+
+        # Confusion matrix
+        y_pred = clf.predict(xtest)
+        plot_confusion_matrix(y_test, y_pred, name)
+
+        # Display classification report (with "YES" and "NO" labels)
+        y_pred_mapped = ["YES" if val == 1 else "NO" for val in y_pred]
+        y_test_mapped = ["YES" if val == 1 else "NO" for val in ytest]
+        print(f"{name} Classification Report:\n", classification_report(y_test_mapped, y_pred_mapped))
+
+        # ROC and AUC
+        if hasattr(clf, "predict_proba"):
+            y_score = clf.predict_proba(xtest)[:, 1]  # For binary classification
+        else:
+            y_score = clf.decision_function(xtest)  # SVM uses decision_function
+
+        plot_roc_auc(ytest, y_score, name)
+
+    return scores
+
+# Training models and evaluating performance
+scores = train_and_evaluate_classifiers(X_train_scaled, X_test_scaled, y_train, y_test)
+
+# Optionally, print the final scores
+print("Final Scores:", scores)
